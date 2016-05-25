@@ -13,6 +13,10 @@
 #define joinCommand ":!join"
 #define leaveCommand ":!leave"
 #define joinCommand ":!join"
+#define helpCommand ":!help"
+#define commandsCommand ":!commands"
+#define sourceCommand ":!source"
+#define versionCommand ":!version"
 
 //The name of this bot
 const char nickName[] = "bobjrseniorTest";
@@ -163,7 +167,6 @@ int handleMessage(char *message){
 		}
 	}while((token = strtok(NULL, delimitors)) != NULL);
 
-	
 	//If this message is a PING, send a PONG
 	if(strcmp(command, "PING") == 0){
 		if(sendMessage("PONG", "", actualMessage, 0) < 0){
@@ -202,12 +205,35 @@ int handleMessage(char *message){
 				if((token = strtok(actualMessage, delimitors)) != NULL){
 					
 					if((token = strtok(NULL, delimitors)) != NULL){
-						printf("CHANNEL TO JOIN: %s\n", token);
 						if(sendMessage("JOIN", "", token, 0) < 0){
 							perror("Error sending message");
 							return -1;
 						}
 					}
+				}
+			}
+			else if(strncmp(actualMessage, helpCommand, strlen(helpCommand)) == 0){
+				if(sendMessage("PRIVMSG", target, "Help come to those who help themself", 1) < 0){
+					perror("Error sending message");
+					return -1;
+				}
+			}
+			else if(strncmp(actualMessage, commandsCommand, strlen(commandsCommand)) == 0){
+				if(sendMessage("PRIVMSG", target, "Available commands are !testCommand, !join <channel> !leave, !quit, !source, !commands, !version", 1) < 0){
+					perror("Error sending message");
+					return -1;
+				}
+			}
+			else if(strncmp(actualMessage, sourceCommand, strlen(sourceCommand)) == 0){
+				if(sendMessage("PRIVMSG", target, "This bot's sourcecode is available at https://github.com/bobjrsenior/ircChatBot", 1) < 0){
+					perror("Error sending message");
+					return -1;
+				}
+			}
+			else if(strncmp(actualMessage, versionCommand, strlen(versionCommand)) == 0){
+				if(sendMessage("PRIVMSG", target, "Not Available", 1) < 0){
+					perror("Error sending message");
+					return -1;
 				}
 			}
 		}
