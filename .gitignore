@@ -63,3 +63,6 @@
 *.dSYM/
 
 *.su
+
+# Swap files from vim
+*.swp

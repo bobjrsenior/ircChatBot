@@ -7,6 +7,13 @@
 #include <netinet/in.h>
 #include <netdb.h> 
 
+//Global Commands
+#define testCommand ":!testCommand"
+#define quitCommand ":!quit"
+#define joinCommand ":!join"
+#define leaveCommand ":!leave"
+#define joinCommand ":!join"
+
 //The name of this bot
 const char nickName[] = "bobjrseniorTest";
 
@@ -73,10 +80,10 @@ int main(int argc, char *argv[])
 		 error("ERROR writing to socket");
 	}
 	//JOIN (#botters-test by default for now)
-	n = sendMessage("JOIN", "", "#botters-test", 0);
-	if (n < 0){
-		 error("ERROR writing to socket");
-	}
+	//n = sendMessage("JOIN", "", "#botters-test", 0);
+	//if (n < 0){
+	//	 error("ERROR writing to socket");
+	//}
 
 	//Loop until we recieve a quit command
 	while(1){
@@ -144,6 +151,7 @@ int handleMessage(char *message){
 				strcpy(actualMessage, token);
 				
 				while((token = strtok(NULL, delimitors)) != NULL){
+					strcat(actualMessage, " ");
 					strcat(actualMessage, token);
 				}
 				break;
@@ -154,6 +162,7 @@ int handleMessage(char *message){
 			}
 		}
 	}while((token = strtok(NULL, delimitors)) != NULL);
+
 	
 	//If this message is a PING, send a PONG
 	if(strcmp(command, "PING") == 0){
@@ -171,17 +180,35 @@ int handleMessage(char *message){
 		//Commands must start with a '!' (ignoring leading : designating the parm
 		if(actualMessage[1] == '!'){
 			//If it is a testCommand, respong with "Hello <sender>"
-			if(strstr(actualMessage, ":!testCommand") != NULL){
+			if(strncmp(actualMessage, testCommand, strlen(testCommand)) == 0){
 				char sending[256];
 				strcpy(sending, "Hello ");
 				strcat(sending, sender);
-				printf("FINAL_MESSAGE: %s\n", sending);
 				if(sendMessage("PRIVMSG", target, sending, 1) < 0){
-					error("Error sending message");
+					perror("Error sending message");
+					return -1;
 				}
 			}//If it is a quit command, signal we are done
-			else if(strstr(actualMessage, ":!quit") != NULL){
+			else if(strncmp(actualMessage, quitCommand, strlen(quitCommand)) == 0){
 				return 1;
+			}
+			else if(strncmp(actualMessage, leaveCommand, strlen(leaveCommand)) == 0){
+				if(sendMessage("PART", "", target, 0) < 0){
+					perror("Error sending message");
+					return -1;
+				}
+			}
+			else if(strncmp(actualMessage, joinCommand, strlen(joinCommand)) == 0){
+				if((token = strtok(actualMessage, delimitors)) != NULL){
+					
+					if((token = strtok(NULL, delimitors)) != NULL){
+						printf("CHANNEL TO JOIN: %s\n", token);
+						if(sendMessage("JOIN", "", token, 0) < 0){
+							perror("Error sending message");
+							return -1;
+						}
+					}
+				}
 			}
 		}
 	}
