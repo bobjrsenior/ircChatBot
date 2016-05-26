@@ -66,3 +66,6 @@
 
 # Swap files from vim
 *.swp
+
+# IRC Account file
+*.cfg

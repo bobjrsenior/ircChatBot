@@ -6,6 +6,8 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netdb.h> 
+#include <inttypes.h>
+#include <errno.h>
 
 //Global Commands
 #define testCommand ":!testCommand"
@@ -17,12 +19,52 @@
 #define commandsCommand ":!commands"
 #define sourceCommand ":!source"
 #define versionCommand ":!version"
+#define addGlobalUserCommand ":!addGlobalUser"
+#define addChannelUserCommand ":!addChannelUser"
+#define addChannelCommand ":!addChannel"
+#define addChannelCommandCommand ":!addCommand"
+
+//Structs
+typedef struct User{
+	char username[256];
+	int privilegeLevel;
+}User;
+
+typedef struct Command{
+	int privilegeLevel;
+	char message[256];
+}Command;
+
+typedef struct Channel{
+	char channelName[256];
+	int addCommandPrivilegeLevel;
+	int numCommands;
+	int maxCommands;
+	Command* commands;
+	int numUsers;
+	int maxUsers;
+	User* users;
+}Channel;
+
+
 
 //The name of this bot
 char username[256];
 
 //The socket connection (Global for convienence)
 int sockfd;
+
+Channel* channels;
+
+int numChannels = 0;
+
+int maxChannels = 0;
+
+User* globalUsers;
+
+int numGlobalUsers;
+
+int maxGlobalUsers;
 
 //Handles an irc message and returns a response when necasary
 int handleMessage(char *message);
@@ -32,6 +74,22 @@ int readMessage(char* buffer, int buffSize);
 
 //Sends an irc message through the socket
 int sendMessage(const char* command, const char* target, const char* message, char multiWord);
+
+int initializeChannelAndUserLists(const char* fileName);
+
+int resizeGlobalUsers();
+
+int resizeChannelList();
+
+int addGlobalUser(const char* newUsername, int privilegeLevel);
+
+int addChannelUser(const char* channel, const char* newUsername, int privilegeLevel);
+
+int checkGlobalPrivilege(const char* user);
+
+int checkChannelPrivilege(const char* channel, const char* user);
+
+void tryChannelCommand(const char* channel, const char* command, const char* user);
 
 void error(const char *msg)
 {
@@ -89,6 +147,12 @@ int main(int argc, char *argv[])
 	}
 	fclose(fptr);
 
+	if(strlen(username) == 0){
+		strcpy(username, "bobjrseniorTest");
+	}
+
+	initializeChannelAndUserLists(NULL);
+	
 	//Initial connection messages
 
 	if(strlen(password) > 0){
@@ -102,9 +166,6 @@ int main(int argc, char *argv[])
 	bzero(password, 256);
 	bzero(buffer, 513);
 
-	if(strlen(username) == 0){
-		strcpy(username, "bobjrseniorTest");
-	}
 
 	//NICK
 	n = sendMessage("NICK", "", username, 0);
@@ -218,56 +279,106 @@ int handleMessage(char *message){
 		if(actualMessage[1] == '!'){
 			//If it is a testCommand, respong with "Hello <sender>"
 			if(strncmp(actualMessage, testCommand, strlen(testCommand)) == 0){
-				char sending[256];
-				strcpy(sending, "Hello ");
-				strcat(sending, sender);
-				if(sendMessage("PRIVMSG", target, sending, 1) < 0){
-					perror("Error sending message");
-					return -1;
+				if(checkGlobalPrivilege(sender) <= 0){
+					char sending[256];
+					strcpy(sending, "Hello ");
+					strcat(sending, sender);
+					if(sendMessage("PRIVMSG", target, sending, 1) < 0){
+						perror("Error sending message");
+						return -1;
+					}
 				}
 			}//If it is a quit command, signal we are done
 			else if(strncmp(actualMessage, quitCommand, strlen(quitCommand)) == 0){
-				return 1;
+				if(checkGlobalPrivilege(sender) <= 0){
+					return 1;
+				}
 			}
 			else if(strncmp(actualMessage, leaveCommand, strlen(leaveCommand)) == 0){
-				if(sendMessage("PART", "", target, 0) < 0){
-					perror("Error sending message");
-					return -1;
+				
+				if(checkGlobalPrivilege(sender) <= 3){
+					if(sendMessage("PART", "", target, 0) < 0){
+						perror("Error sending message");
+						return -1;
+					}
 				}
 			}
 			else if(strncmp(actualMessage, joinCommand, strlen(joinCommand)) == 0){
-				if((token = strtok(actualMessage, delimitors)) != NULL){
+				
+				if(checkGlobalPrivilege(sender) <= 3){
+					if((token = strtok(actualMessage, delimitors)) != NULL){
 					
-					if((token = strtok(NULL, delimitors)) != NULL){
-						if(sendMessage("JOIN", "", token, 0) < 0){
-							perror("Error sending message");
-							return -1;
+						if((token = strtok(NULL, delimitors)) != NULL){
+							if(sendMessage("JOIN", "", token, 0) < 0){
+								perror("Error sending message");
+								return -1;
+							}
 						}
 					}
 				}
 			}
 			else if(strncmp(actualMessage, helpCommand, strlen(helpCommand)) == 0){
-				if(sendMessage("PRIVMSG", target, "Help come to those who help themself", 1) < 0){
-					perror("Error sending message");
-					return -1;
+			
+				if(checkGlobalPrivilege(sender) <= 9){
+					if(sendMessage("PRIVMSG", target, "Help come to those who help themself", 1) < 0){
+						perror("Error sending message");
+						return -1;
+					}
 				}
 			}
 			else if(strncmp(actualMessage, commandsCommand, strlen(commandsCommand)) == 0){
-				if(sendMessage("PRIVMSG", target, "Available commands are !testCommand, !join <channel> !leave, !quit, !source, !commands, !version", 1) < 0){
-					perror("Error sending message");
-					return -1;
+				
+				if(checkGlobalPrivilege(sender) <= 9){
+					if(sendMessage("PRIVMSG", target, "Available commands are !testCommand, !join <channel> !leave, !quit, !source, !commands, !version", 1) < 0){
+						perror("Error sending message");
+						return -1;
+					}
 				}
 			}
 			else if(strncmp(actualMessage, sourceCommand, strlen(sourceCommand)) == 0){
-				if(sendMessage("PRIVMSG", target, "This bot's sourcecode is available at https://github.com/bobjrsenior/ircChatBot", 1) < 0){
-					perror("Error sending message");
-					return -1;
+				
+				if(checkGlobalPrivilege(sender) <= 9){
+					if(sendMessage("PRIVMSG", target, "This bot's sourcecode is available at https://github.com/bobjrsenior/ircChatBot", 1) < 0){
+						perror("Error sending message");
+						return -1;
+					}
 				}
 			}
 			else if(strncmp(actualMessage, versionCommand, strlen(versionCommand)) == 0){
-				if(sendMessage("PRIVMSG", target, "Not Available", 1) < 0){
-					perror("Error sending message");
-					return -1;
+				
+				if(checkGlobalPrivilege(sender) <= 9){
+					if(sendMessage("PRIVMSG", target, "Not Available", 1) < 0){
+						perror("Error sending message");
+						return -1;
+					}
+				}
+			}
+			else if(strncmp(actualMessage, addGlobalUserCommand, strlen(addGlobalUserCommand)) == 0){
+				
+				if(checkGlobalPrivilege(sender) <= 0){
+					
+					if((token = strtok(actualMessage, delimitors)) != NULL){
+						if((token = strtok(NULL, delimitors)) != NULL){
+							char* privilegeChar;	
+							int convertedPrivilege;
+							if((privilegeChar = strtok(NULL, delimitors)) != NULL){
+								convertedPrivilege = (int) strtoimax(privilegeChar, NULL, 10);
+								if(errno != ERANGE && addGlobalUser(token, convertedPrivilege) >= 0){
+									if(sendMessage("PRIVMSG", target, "Global user added successfully", 1) < 0){
+										perror("Error sending message");
+										return -1;
+									}
+									return 0;
+								}
+								errno = 0;
+							}
+						}
+					}
+					
+					if(sendMessage("PRIVMSG", target, "Error while adding global user", 1) < 0){
+						perror("Error sending message");
+						return -1;
+					}
 				}
 			}
 		}
@@ -312,4 +423,77 @@ int sendMessage(const char* command, const char* target, const char* message, ch
 	buffer[len++] = '\r';
 	buffer[len++] = '\n';
 	return write(sockfd, buffer, len);
+}
+
+
+int initializeChannelAndUserLists(const char* fileName){
+	//Initialize Global List
+	numGlobalUsers = 1;
+	maxGlobalUsers = 10;
+	if((globalUsers = (User*) malloc(maxGlobalUsers * sizeof(User))) == NULL){
+		return -1;
+	}
+	globalUsers[0].privilegeLevel = 0;
+	strcpy(globalUsers[0].username, username);
+
+	//Initialize Channel List
+	numChannels = 0;
+	maxChannels = 10;
+	if((channels = (Channel*) malloc(maxChannels * sizeof(Channel))) == NULL){
+		return -1;
+	}
+	return 0;
+}
+
+int resizeGlobalUsers(){
+	maxGlobalUsers *= 1.5;
+	if((globalUsers = (User*) realloc(globalUsers, maxGlobalUsers * sizeof(User))) == NULL){
+		return -1;
+	}
+	return 0;
+}
+
+int resizeChannelUist(){
+	maxChannels *= 1.5;
+	if((channels = (Channel*) realloc(channels, maxChannels * sizeof(Channel))) == NULL){
+		return -1;
+	}
+	return 0;
+}
+
+int addGlobalUser(const char* newUsername, int privilegeLevel){
+	if(maxGlobalUsers == numGlobalUsers){
+		if(resizeGlobalUsers < 0){
+			return -1;
+		}
+	}
+
+	globalUsers[numGlobalUsers].privilegeLevel = privilegeLevel;
+	strcpy(globalUsers[numGlobalUsers].username, newUsername);
+	
+	++numGlobalUsers;
+	return 0;
+}
+
+int addChannelUser(const char* channel, const char* newUsername, int privilegeLevel){
+	return -1;
+}
+
+int checkGlobalPrivilege(const char* user){
+	int e = 0;
+	int global = numGlobalUsers;
+	for(; e < global; ++e){
+		if(strcmp(user, globalUsers[e].username) == 0){
+			return globalUsers[e].privilegeLevel;
+		}
+	}
+	return 9;
+}
+
+int checkChannelPrivilege(const char* channel, const char* user){
+	return 9;
+}
+
+void tryChannelCommand(const char* channel, const char* command, const char* user){
+
 }
