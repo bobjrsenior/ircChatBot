@@ -19,7 +19,7 @@
 #define versionCommand ":!version"
 
 //The name of this bot
-const char nickName[] = "bobjrseniorTest";
+char username[256];
 
 //The socket connection (Global for convienence)
 int sockfd;
@@ -44,10 +44,11 @@ int main(int argc, char *argv[])
 	int portno, n;
 	struct sockaddr_in serv_addr;
 	struct hostent *server;
-
+	char password[256];
+	FILE *fptr;
 	char buffer[513];
 	//Set up the cokect connection
-	if (argc < 3) {
+	if (argc < 4) {
 	   fprintf(stderr,"usage %s hostname port\n", argv[0]);
 	   exit(0);
 	}
@@ -70,24 +71,57 @@ int main(int argc, char *argv[])
 	if (connect(sockfd,(struct sockaddr *) &serv_addr,sizeof(serv_addr)) < 0){
 		error("ERROR connecting");
 	}
+	
+	
+	//Retrieve account information
+	if((fptr = fopen(argv[3], "r")) == NULL){
+		perror("Error opening account file");
+		return -1;
+	}
 
-	//Initial connection messaged
+	while(fscanf(fptr, "%64s ", buffer) == 1){
+		if(strcmp(buffer, "USERNAME") == 0){
+			fscanf(fptr, "%64s ", username);
+		}
+		else if(strcmp(buffer, "PASSWORD") == 0){
+			fscanf(fptr, "%64s ", password);
+		}
+	}
+	fclose(fptr);
+
+	//Initial connection messages
+
+	if(strlen(password) > 0){
+		
+		//PASS
+		n = sendMessage("PASS", "", password, 0);
+		if (n < 0){
+			 error("ERROR writing to socket");
+		}
+	}
+	bzero(password, 256);
+	bzero(buffer, 513);
+
+	if(strlen(username) == 0){
+		strcpy(username, "bobjrseniorTest");
+	}
 
 	//NICK
-	n = sendMessage("NICK", "", nickName, 0);
+	n = sendMessage("NICK", "", username, 0);
 	if (n < 0){
 		 error("ERROR writing to socket");
 	}
+
 	//USER
-	n = sendMessage("USER", "", "guest 0 * :bob", 0);
-	if (n < 0){
-		 error("ERROR writing to socket");
-	}
-	//JOIN (#botters-test by default for now)
-	//n = sendMessage("JOIN", "", "#botters-test", 0);
+	//n = sendMessage("USER", "", "guest 0 * :bob", 0);
 	//if (n < 0){
 	//	 error("ERROR writing to socket");
 	//}
+	//JOIN (#botters-test by default for now)
+	n = sendMessage("JOIN", "", "#botjrsenior", 0);
+	if (n < 0){
+		 error("ERROR writing to socket");
+	}
 
 	//Loop until we recieve a quit command
 	while(1){
@@ -177,7 +211,7 @@ int handleMessage(char *message){
 		//Find the sender
 		char* sender =  strtok(&prefixBuff[1], ":!");
 		//If it was a pm, change the target to the user pming this bot
-		if(strcmp(target, nickName) == 0){
+		if(strcmp(target, username) == 0){
 			strcpy(target, sender);
 		}
 		//Commands must start with a '!' (ignoring leading : designating the parm
