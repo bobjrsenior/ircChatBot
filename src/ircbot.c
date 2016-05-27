@@ -81,9 +81,15 @@ int resizeGlobalUsers();
 
 int resizeChannelList();
 
+User* resizeGenericUserList(User* users, int* curMaxSize);
+
+Command* resizeGenericCommandsList(Command* commands, int* curMaxSize);
+
 int addGlobalUser(const char* newUsername, int privilegeLevel);
 
 int addChannelUser(const char* channel, const char* newUsername, int privilegeLevel);
+
+int addChannel(const char* channel);
 
 int checkGlobalPrivilege(const char* user);
 
@@ -136,6 +142,11 @@ int main(int argc, char *argv[])
 		perror("Error opening account file");
 		return -1;
 	}
+
+
+	bzero(username, 256);
+	bzero(password, 256);
+	bzero(buffer, 513);
 
 	while(fscanf(fptr, "%64s ", buffer) == 1){
 		if(strcmp(buffer, "USERNAME") == 0){
@@ -386,6 +397,58 @@ int handleMessage(char *message){
 					}
 				}
 			}
+			else if(strncmp(actualMessage, addChannelUserCommand, strlen(addChannelUserCommand)) == 0){
+				if(checkChannelPrivilege(target, sender) <= 3){
+					if(strtok(actualMessage, delimitors) != NULL && (token = strtok(NULL, delimitors)) != NULL){
+						
+						char* privilegeChar;	
+						int convertedPrivilege;
+						if((privilegeChar = strtok(NULL, delimitors)) != NULL){
+							convertedPrivilege = (int) strtoimax(privilegeChar, NULL, 10);
+							int status;
+						
+							if(errno == ERANGE || (status = addChannelUser(target, token, convertedPrivilege)) < 0){
+								perror("Error adding user");
+								return -1;
+							}
+							
+							if(sendMessage("PRIVMSG", target, (status == 0) ? "Channel user added successfully" : "Channel user updated", 1) < 0){
+								perror("Error sending message");
+								return -1;
+							}
+						}						
+					}
+				}
+			}
+			else if(strncmp(actualMessage, addChannelCommand, strlen(addChannelCommand)) == 0){
+				if(checkGlobalPrivilege(sender) <= 3){
+					if(strtok(actualMessage, delimitors) != NULL && (token = strtok(NULL, delimitors)) != NULL){
+						char status;
+						if((status = addChannel(token)) < 0 || addChannelUser(token, sender, 0) < 0){
+							perror("Error adding channel");
+							return -1;
+						}
+						
+						if(sendMessage("PRIVMSG", target, (status == 0) ? "Channel added successfully" : "Channel Already exists", 1) < 0){
+							perror("Error sending message");
+							return -1;
+						}
+						
+					}
+					else{	
+						char status;
+						if((status = addChannel(target)) < 0 || addChannelUser(target, sender, 0) < 0){
+							perror("Error adding channel");
+							return -1;
+						}
+						
+						if(sendMessage("PRIVMSG", target, (status == 0) ? "Channel added successfully" : "Channel Already exists", 1) < 0){
+							perror("Error sending message");
+							return -1;
+						}
+					}
+				}
+			}
 		}
 	}
 	return 0;
@@ -462,12 +525,22 @@ int resizeGlobalUsers(){
 	return 0;
 }
 
-int resizeChannelUist(){
+int resizeChannelList(){
 	maxChannels *= 1.5;
 	if((channels = (Channel*) realloc(channels, maxChannels * sizeof(Channel))) == NULL){
 		return -1;
 	}
 	return 0;
+}
+
+User* resizeGenericUserList(User* users, int* curMaxSize){
+	*curMaxSize = *curMaxSize * 1.5;
+	return (User*) realloc(users, *curMaxSize * sizeof(User));
+}
+
+Command* resizeGenericCommandsList(Command* commands, int* curMaxSize){
+	*curMaxSize = *curMaxSize * 1.5;
+	return (Command*) realloc(commands, *curMaxSize * sizeof(Command));
 }
 
 int addGlobalUser(const char* newUsername, int privilegeLevel){
@@ -480,7 +553,7 @@ int addGlobalUser(const char* newUsername, int privilegeLevel){
 	}
 
 	if(maxGlobalUsers == numGlobalUsers){
-		if(resizeGlobalUsers < 0){
+		if(resizeGlobalUsers() < 0){
 			return -1;
 		}
 	}
@@ -493,7 +566,64 @@ int addGlobalUser(const char* newUsername, int privilegeLevel){
 }
 
 int addChannelUser(const char* channel, const char* newUsername, int privilegeLevel){
+	int e = 0;
+	for(; e < numChannels; ++e){
+		if(strcmp(channel, channels[e].channelName) == 0){
+			int a = 0;
+			for(; a < channels[e].numUsers; ++a){
+				if(strcmp(newUsername, channels[e].users[a].username) == 0){
+					channels[e].users[a].privilegeLevel = privilegeLevel;
+					return 1;
+				}
+			}
+			if(channels[e].numUsers == channels[e].maxUsers){
+				if(resizeGenericUserList(channels[e].users, &channels[e].maxUsers) < 0){
+					return -1;
+				}
+			}
+			channels[e].users[channels[e].numUsers].privilegeLevel = privilegeLevel;
+			strcpy(channels[e].users[channels[e].numUsers].username, newUsername);
+			++channels[e].numUsers;
+			return 0;
+		}
+	}
+
 	return -1;
+}
+
+int addChannel(const char* channel){
+	int e = 0;
+	for(; e < numChannels; ++e){
+		if(strcmp(channel, channels[e].channelName) == 0){
+			return 1;
+		}
+	}
+
+	if(maxChannels == numChannels){
+		if(resizeChannelList() < 0){
+			return -1;
+		}
+	}
+	
+	strcpy(channels[numChannels].channelName, channel);
+	channels[numChannels].addCommandPrivilegeLevel = 0;
+	channels[numChannels].numCommands = 0;
+	channels[numChannels].maxCommands = 10;
+	
+	//Create commands	
+	if((channels[numChannels].commands = (Command*) malloc(10 * sizeof(User))) == NULL){
+		return -1;
+	}
+
+	channels[numChannels].numUsers = 0;
+	channels[numChannels].maxUsers = 10;
+	//Create Users
+	if((channels[numChannels].users = (User*) malloc(10 * sizeof(User))) == NULL){
+		return -1;
+	}
+
+	++numChannels;
+	return 0;
 }
 
 int checkGlobalPrivilege(const char* user){
@@ -508,6 +638,18 @@ int checkGlobalPrivilege(const char* user){
 }
 
 int checkChannelPrivilege(const char* channel, const char* user){
+	int e = 0;
+	for(; e < numChannels; ++e){
+		if(strcmp(channel, channels[e].channelName) == 0){
+			int a = 0;
+			for(; a < channels[e].numUsers; ++a){
+				if(strcmp(user, channels[e].users[a].username) == 0){
+					return channels[e].users[a].privilegeLevel;
+				}
+			}
+		}
+	}
+
 	return 9;
 }
 
