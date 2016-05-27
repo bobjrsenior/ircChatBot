@@ -162,9 +162,10 @@ int main(int argc, char *argv[])
 		if (n < 0){
 			 error("ERROR writing to socket");
 		}
+		bzero(password, 256);
+		bzero(buffer, 513);
+		password[0] = 1;
 	}
-	bzero(password, 256);
-	bzero(buffer, 513);
 
 
 	//NICK
@@ -173,11 +174,14 @@ int main(int argc, char *argv[])
 		 error("ERROR writing to socket");
 	}
 
-	//USER
-	//n = sendMessage("USER", "", "guest 0 * :bob", 0);
-	//if (n < 0){
-	//	 error("ERROR writing to socket");
-	//}
+	//You are a guest if you don't have a password
+	if(strlen(password) == 0){
+		//USER
+		n = sendMessage("USER", "", "guest 0 * :bob", 0);
+		if (n < 0){
+			 error("ERROR writing to socket");
+		}
+	}
 	//JOIN (#botters-test by default for now)
 	n = sendMessage("JOIN", "", "#botjrsenior", 0);
 	if (n < 0){
@@ -329,7 +333,7 @@ int handleMessage(char *message){
 			else if(strncmp(actualMessage, commandsCommand, strlen(commandsCommand)) == 0){
 				
 				if(checkGlobalPrivilege(sender) <= 9){
-					if(sendMessage("PRIVMSG", target, "Available commands are !testCommand, !join <channel> !leave, !quit, !source, !commands, !version", 1) < 0){
+					if(sendMessage("PRIVMSG", target, "Available commands are !testCommand, !join <channel>, !leave, !quit, !source, !commands, !version, !addGlobalUser", 1) < 0){
 						perror("Error sending message");
 						return -1;
 					}
@@ -363,8 +367,9 @@ int handleMessage(char *message){
 							int convertedPrivilege;
 							if((privilegeChar = strtok(NULL, delimitors)) != NULL){
 								convertedPrivilege = (int) strtoimax(privilegeChar, NULL, 10);
-								if(errno != ERANGE && addGlobalUser(token, convertedPrivilege) >= 0){
-									if(sendMessage("PRIVMSG", target, "Global user added successfully", 1) < 0){
+								int status;
+								if(errno != ERANGE && (status = addGlobalUser(token, convertedPrivilege)) >= 0){
+									if(sendMessage("PRIVMSG", target, (status == 0) ? "Global user added successfully" : "Global user updated successfully", 1) < 0){
 										perror("Error sending message");
 										return -1;
 									}
@@ -427,6 +432,8 @@ int sendMessage(const char* command, const char* target, const char* message, ch
 
 
 int initializeChannelAndUserLists(const char* fileName){
+	char mainAdmin[] = "bobjrsenior";
+
 	//Initialize Global List
 	numGlobalUsers = 1;
 	maxGlobalUsers = 10;
@@ -442,7 +449,9 @@ int initializeChannelAndUserLists(const char* fileName){
 	if((channels = (Channel*) malloc(maxChannels * sizeof(Channel))) == NULL){
 		return -1;
 	}
-	return 0;
+
+
+	return addGlobalUser(mainAdmin, 0);
 }
 
 int resizeGlobalUsers(){
@@ -462,6 +471,14 @@ int resizeChannelUist(){
 }
 
 int addGlobalUser(const char* newUsername, int privilegeLevel){
+	int e = 0;
+	for(; e < numGlobalUsers; ++e){
+		if(strcmp(newUsername, globalUsers[e].username) == 0){
+			globalUsers[e].privilegeLevel = privilegeLevel;
+			return 1;
+		}
+	}
+
 	if(maxGlobalUsers == numGlobalUsers){
 		if(resizeGlobalUsers < 0){
 			return -1;
