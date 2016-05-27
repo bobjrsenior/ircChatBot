@@ -230,7 +230,7 @@ int handleMessage(char *message){
 	char command[8];
 	char target[512];
 	char actualMessage[512];
-	char delimitors[] = " "; 		
+	char delimitors[] = " \r\n";	
 	printf("%s\n", message);
 
 	char* token = NULL;
@@ -294,8 +294,13 @@ int handleMessage(char *message){
 		}
 		//Commands must start with a '!' (ignoring leading : designating the parm
 		if(actualMessage[1] == '!'){
+			char* command;
+			if((command = strtok(actualMessage, delimitors)) == NULL){
+				return -1;
+			}
+
 			//If it is a testCommand, respong with "Hello <sender>"
-			if(strncmp(actualMessage, testCommand, strlen(testCommand)) == 0){
+			if(strcmp(command, testCommand) == 0){
 				if(checkGlobalPrivilege(sender) <= 0){
 					char sending[256];
 					strcpy(sending, "Hello ");
@@ -306,12 +311,12 @@ int handleMessage(char *message){
 					}
 				}
 			}//If it is a quit command, signal we are done
-			else if(strncmp(actualMessage, quitCommand, strlen(quitCommand)) == 0){
+			else if(strcmp(command, quitCommand) == 0){
 				if(checkGlobalPrivilege(sender) <= 0){
 					return 1;
 				}
 			}
-			else if(strncmp(actualMessage, leaveCommand, strlen(leaveCommand)) == 0){
+			else if(strcmp(command, leaveCommand) == 0){
 				
 				if(checkGlobalPrivilege(sender) <= 3){
 					if(sendMessage("PART", "", target, 0) < 0){
@@ -320,21 +325,18 @@ int handleMessage(char *message){
 					}
 				}
 			}
-			else if(strncmp(actualMessage, joinCommand, strlen(joinCommand)) == 0){
+			else if(strcmp(command, joinCommand) == 0){
 				
-				if(checkGlobalPrivilege(sender) <= 3){
-					if((token = strtok(actualMessage, delimitors)) != NULL){
-					
-						if((token = strtok(NULL, delimitors)) != NULL){
-							if(sendMessage("JOIN", "", token, 0) < 0){
-								perror("Error sending message");
-								return -1;
-							}
+				if(checkGlobalPrivilege(sender) <= 3){	
+					if((token = strtok(NULL, delimitors)) != NULL){
+						if(sendMessage("JOIN", "", token, 0) < 0){
+							perror("Error sending message");
+							return -1;
 						}
 					}
 				}
 			}
-			else if(strncmp(actualMessage, helpCommand, strlen(helpCommand)) == 0){
+			else if(strcmp(command, helpCommand) == 0){
 			
 				if(checkGlobalPrivilege(sender) <= 9){
 					if(sendMessage("PRIVMSG", target, "Help come to those who help themself", 1) < 0){
@@ -343,7 +345,7 @@ int handleMessage(char *message){
 					}
 				}
 			}
-			else if(strncmp(actualMessage, commandsCommand, strlen(commandsCommand)) == 0){
+			else if(strcmp(command, commandsCommand) == 0){
 				
 				if(checkGlobalPrivilege(sender) <= 9){
 					if(sendMessage("PRIVMSG", target, "Available commands are !testCommand, !join <channel>, !leave, !quit, !source, !commands, !version, !addGlobalUser", 1) < 0){
@@ -352,7 +354,7 @@ int handleMessage(char *message){
 					}
 				}
 			}
-			else if(strncmp(actualMessage, sourceCommand, strlen(sourceCommand)) == 0){
+			else if(strcmp(command, sourceCommand) == 0){
 				
 				if(checkGlobalPrivilege(sender) <= 9){
 					if(sendMessage("PRIVMSG", target, "This bot's sourcecode is available at https://github.com/bobjrsenior/ircChatBot", 1) < 0){
@@ -361,7 +363,7 @@ int handleMessage(char *message){
 					}
 				}
 			}
-			else if(strncmp(actualMessage, versionCommand, strlen(versionCommand)) == 0){
+			else if(strcmp(command, versionCommand) == 0){
 				
 				if(checkGlobalPrivilege(sender) <= 9){
 					if(sendMessage("PRIVMSG", target, "Not Available", 1) < 0){
@@ -370,28 +372,27 @@ int handleMessage(char *message){
 					}
 				}
 			}
-			else if(strncmp(actualMessage, addGlobalUserCommand, strlen(addGlobalUserCommand)) == 0){
+			else if(strcmp(command, addGlobalUserCommand) == 0){
 				
 				if(checkGlobalPrivilege(sender) <= 0){
 					
-					if((token = strtok(actualMessage, delimitors)) != NULL){
-						if((token = strtok(NULL, delimitors)) != NULL){
-							char* privilegeChar;	
-							int convertedPrivilege;
-							if((privilegeChar = strtok(NULL, delimitors)) != NULL){
-								convertedPrivilege = (int) strtoimax(privilegeChar, NULL, 10);
-								int status;
-								if(errno != ERANGE && (status = addGlobalUser(token, convertedPrivilege)) >= 0){
-									if(sendMessage("PRIVMSG", target, (status == 0) ? "Global user added successfully" : "Global user updated successfully", 1) < 0){
-										perror("Error sending message");
-										return -1;
-									}
-									return 0;
+					if((token = strtok(NULL, delimitors)) != NULL){
+						char* privilegeChar;	
+						int convertedPrivilege;
+						if((privilegeChar = strtok(NULL, delimitors)) != NULL){
+							convertedPrivilege = (int) strtoimax(privilegeChar, NULL, 10);
+							int status;
+							if(errno != ERANGE && (status = addGlobalUser(token, convertedPrivilege)) >= 0){
+								if(sendMessage("PRIVMSG", target, (status == 0) ? "Global user added successfully" : "Global user updated successfully", 1) < 0){
+									perror("Error sending message");
+									return -1;
 								}
-								errno = 0;
+								return 0;
 							}
+							errno = 0;
 						}
 					}
+					
 					
 					if(sendMessage("PRIVMSG", target, "Error while adding global user", 1) < 0){
 						perror("Error sending message");
@@ -399,11 +400,11 @@ int handleMessage(char *message){
 					}
 				}
 			}
-			else if(strncmp(actualMessage, addChannelUserCommand, strlen(addChannelUserCommand)) == 0){
+			else if(strcmp(command, addChannelUserCommand) == 0){
 				Channel* channel = getChannel(target);
 				
 				if(channel != NULL && checkChannelPrivilege(channel, sender) <= channel->addCommandPrivilegeLevel){
-					if(strtok(actualMessage, delimitors) != NULL && (token = strtok(NULL, delimitors)) != NULL){
+					if((token = strtok(NULL, delimitors)) != NULL){
 						
 						char* privilegeChar;	
 						int convertedPrivilege;
@@ -424,9 +425,10 @@ int handleMessage(char *message){
 					}
 				}
 			}
-			else if(strncmp(actualMessage, addChannelCommand, strlen(addChannelCommand)) == 0){
+			else if(strcmp(command, addChannelCommand) == 0){
 				if(checkGlobalPrivilege(sender) <= 3){
-					if(strtok(actualMessage, delimitors) != NULL && (token = strtok(NULL, delimitors)) != NULL){
+					if((token = strtok(NULL, delimitors)) != NULL){
+						
 						char status;
 						if((status = addChannel(token)) < 0){
 							perror("Error adding channel");
@@ -445,7 +447,7 @@ int handleMessage(char *message){
 						}
 						
 					}
-					else{	
+					else{
 						char status;
 						if((status = addChannel(target)) < 0){
 							perror("Error adding channel");
@@ -464,13 +466,10 @@ int handleMessage(char *message){
 					}
 				}
 			}
-			else if(strncmp(actualMessage, updateAddChannelCommandPrivilegeLevelCommand, strlen(updateAddChannelCommandPrivilegeLevelCommand)) == 0){
+			else if(strcmp(command, updateAddChannelCommandPrivilegeLevelCommand) == 0){
 				Channel* channel = getChannel(target);
-				printf("In Command\n");
 				if(channel != NULL && checkChannelPrivilege(channel, sender) <= channel->addCommandPrivilegeLevel){
-					printf("Found channel and have permission\n");
-					if(strtok(actualMessage, delimitors) != NULL && (token = strtok(NULL, delimitors)) != NULL){
-						printf("Tokenized: %s\n", token);	
+					if((token = strtok(NULL, delimitors)) != NULL){
 						int convertedPrivilege;
 						convertedPrivilege = (int) strtoimax(token, NULL, 10);
 						
