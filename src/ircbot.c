@@ -33,6 +33,7 @@ typedef struct User{
 
 typedef struct Command{
 	int privilegeLevel;
+	char command[256];
 	char message[256];
 }Command;
 
@@ -92,13 +93,13 @@ int addChannelUser(Channel* channel, const char* newUsername, int privilegeLevel
 
 int addChannel(const char* channel);
 
+int addNewChannelCommand(Channel* channel, const char* command, const char* message, int privilegeLevel);
+
 Channel* getChannel(const char* channel);
 
 int checkGlobalPrivilege(const char* user);
 
 int checkChannelPrivilege(Channel* channel, const char* user);
-
-void tryChannelCommand(const char* channel, const char* command, const char* user);
 
 void error(const char *msg)
 {
@@ -210,9 +211,11 @@ int main(int argc, char *argv[])
 			error("ERROR reading from socket");
 			break;
 		}
-		//Handle the message and quit if we want to
-		if(handleMessage(buffer) == 1){
-			break;
+		else if(n > 0){
+			//Handle the message and quit if we want to
+			if(handleMessage(buffer) == 1){
+				break;
+			}
 		}
 	}
 	//Tell the socket that we are leaving
@@ -298,7 +301,6 @@ int handleMessage(char *message){
 			if((command = strtok(actualMessage, delimitors)) == NULL){
 				return -1;
 			}
-
 			//If it is a testCommand, respong with "Hello <sender>"
 			if(strcmp(command, testCommand) == 0){
 				if(checkGlobalPrivilege(sender) <= 0){
@@ -487,6 +489,61 @@ int handleMessage(char *message){
 					}
 				}
 			}
+			else if(strcmp(command, addChannelCommandCommand) == 0){
+				Channel* channel = getChannel(target);
+				char* charPrivilege;;
+				if(channel != NULL && checkChannelPrivilege(channel, sender) <= channel->addCommandPrivilegeLevel){
+					if((token = strtok(NULL, delimitors)) != NULL && token[0] == '!' && (charPrivilege = strtok(NULL, delimitors)) != NULL){
+						printf("TOKEN: %s\nprivilege: %s\n", token, charPrivilege);
+
+						int convertedPrivilege;
+						convertedPrivilege = (int) strtoimax(charPrivilege, NULL, 10);
+						char message[256];
+						if(errno == ERANGE){
+							perror("Error converting privilege");
+							return -1;
+						}
+
+						if((charPrivilege = strtok(NULL, delimitors)) != NULL){
+							strcpy(message, charPrivilege);
+						}
+						while((charPrivilege = strtok(NULL, delimitors)) != NULL){
+							strcat(message, " ");
+							strcat(message, charPrivilege);
+						}
+
+						int status = addNewChannelCommand(channel, token, message, convertedPrivilege);
+						if(status < 0){
+							return -1;
+						}
+						if(sendMessage("PRIVMSG", target, (status == 0) ? "Command successfuly added" : "Command successfully updated", 1) < 0){
+							return -1;
+						}
+					}
+				}
+			
+			}//Channel specific commands
+			else{
+				Channel* channel = getChannel(target);
+				if(channel == NULL){
+					return 0;
+				}
+				int userPrivilege = checkChannelPrivilege(channel, sender);
+				int e = 0;
+				for(; e < channel->numCommands; ++e){
+					if(strcmp(&command[1], channel->commands[e].command) == 0){
+						if(userPrivilege <= channel->commands[e].privilegeLevel){
+							if(sendMessage("PRIVMSG", target, channel->commands[e].message, 1) == 0){
+								return -1;
+							}
+							break;
+						}
+						else{
+							break;
+						}
+					}
+				}
+			}
 		}
 	}
 	return 0;
@@ -657,6 +714,30 @@ int addChannel(const char* channel){
 	return 0;
 }
 
+int addNewChannelCommand(Channel* channel, const char* command, const char* message, int privilegeLevel){
+	int e = 0;
+	for(; e < channel->numCommands; ++e){
+		if(strcmp(command, channel->commands[e].command) == 0){
+			channel->commands[e].privilegeLevel = privilegeLevel;
+			strcpy(channel->commands[e].message, message);
+			return 1;
+		}
+	}
+
+	if(channel->numCommands == channel->maxCommands){
+		if(resizeGenericCommandsList(channel->commands, &channel->maxCommands) < 0){
+			return -1;
+		}
+	}
+
+	channel->commands[channel->numCommands].privilegeLevel = privilegeLevel;
+	strcpy(channel->commands[channel->numCommands].command, command);
+	strcpy(channel->commands[channel->numCommands].message, message);
+
+	++channel->numCommands;
+	return 0;
+}
+
 Channel* getChannel(const char* channel){
 	int e = 0;
 	for(; e < numChannels; ++e){
@@ -689,6 +770,3 @@ int checkChannelPrivilege(Channel* channel, const char* user){
 	return 9;
 }
 
-void tryChannelCommand(const char* channel, const char* command, const char* user){
-
-}
