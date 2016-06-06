@@ -8,6 +8,7 @@
 #include <netdb.h> 
 #include <inttypes.h>
 #include <errno.h>
+#include <time.h>
 
 //Global Commands
 #define testCommand ":!testCommand"
@@ -19,6 +20,8 @@
 #define commandsCommand ":!commands"
 #define sourceCommand ":!source"
 #define versionCommand ":!version"
+#define saveCommand ":!save"
+#define loadCommand ":!load"
 #define addGlobalUserCommand ":!addGlobalUser"
 #define addChannelUserCommand ":!addChannelUser"
 #define addChannelCommand ":!addChannel"
@@ -49,6 +52,7 @@ typedef struct Channel{
 }Channel;
 
 
+char* saveFile = NULL;
 
 //The name of this bot
 char username[256];
@@ -77,7 +81,11 @@ int readMessage(char* buffer, int buffSize);
 //Sends an irc message through the socket
 int sendMessage(const char* command, const char* target, const char* message, char multiWord);
 
-int initializeChannelAndUserLists(const char* fileName);
+int initializeChannelAndUserLists();
+
+int saveCurrentState();
+
+int loadCurrentState();
 
 int resizeGlobalUsers();
 
@@ -109,23 +117,50 @@ void error(const char *msg)
 
 int main(int argc, char *argv[])
 {
-	int portno, n;
+	time_t lastTimeSaved;
+	struct timespec spec;
+
+	int portno = 6667, host = -1, account = -1, n, e;
 	struct sockaddr_in serv_addr;
 	struct hostent *server;
 	char password[256];
 	FILE *fptr;
 	char buffer[513];
-	//Set up the cokect connection
-	if (argc < 4) {
-	   fprintf(stderr,"usage %s hostname port\n", argv[0]);
-	   exit(0);
+
+	for(e = 0; e < argc; ++e){
+		if(strcmp(argv[e], "-port") == 0){
+			portno = atoi(argv[e + 1]);
+			++e;
+		}
+		else if(strcmp(argv[e], "-hostname") == 0){
+			host = ++e;
+		}
+		else if(strcmp(argv[e], "-account") == 0){
+			account = ++e;
+		}
+		else if(strcmp(argv[e], "-settings") == 0){
+			saveFile = argv[++e];
+		}
 	}
-	portno = atoi(argv[2]);
+
+	if(host == -1){
+		printf("Please add a hostname with the -hostname option\n");
+		return 0;
+	}
+	else if(account == -1){
+		printf("Please add where your login credentials are located with the -account option\n");
+		return 0;
+	}
+
+	clock_gettime(CLOCK_REALTIME, &spec);
+	lastTimeSaved = spec.tv_sec;
+
+	//Set up the sokect connection
 	sockfd = socket(AF_INET, SOCK_STREAM, 0);
 	if (sockfd < 0){
 		error("ERROR opening socket");
 	}
-	server = gethostbyname(argv[1]);
+	server = gethostbyname(argv[host]);
 	if (server == NULL) {
 		fprintf(stderr,"ERROR, no such host\n");
 		exit(0);
@@ -141,7 +176,7 @@ int main(int argc, char *argv[])
 	}
 	
 	//Retrieve account information
-	if((fptr = fopen(argv[3], "r")) == NULL){
+	if((fptr = fopen(argv[account], "r")) == NULL){
 		perror("Error opening account file");
 		return -1;
 	}
@@ -165,7 +200,7 @@ int main(int argc, char *argv[])
 		strcpy(username, "bobjrseniorTest");
 	}
 
-	initializeChannelAndUserLists(NULL);
+	initializeChannelAndUserLists();
 	
 	//Initial connection messages
 
@@ -217,6 +252,17 @@ int main(int argc, char *argv[])
 				break;
 			}
 		}
+
+		clock_gettime(CLOCK_REALTIME, &spec);
+		if(spec.tv_sec - lastTimeSaved >= 1800){
+			lastTimeSaved = spec.tv_sec;
+			if(saveCurrentState() < 0){
+				perror("Failed to save current state");
+				break;
+			}
+			printf("Saved current state\n");
+		}
+		
 	}
 	//Tell the socket that we are leaving
 	n = sendMessage("QUIT", "", "Quitting Session", 0);
@@ -301,8 +347,16 @@ int handleMessage(char *message){
 			if((command = strtok(actualMessage, delimitors)) == NULL){
 				return -1;
 			}
-			//If it is a testCommand, respong with "Hello <sender>"
-			if(strcmp(command, testCommand) == 0){
+			if(strcmp(command, saveCommand) == 0){
+				if(saveCurrentState() < 0){
+					return -1;
+				}
+				if(sendMessage("PRIVMSG", target, "Saved settings successfully", 1) < 0){
+					perror("Error sending message");
+					return -1;
+				}
+			}
+			else if(strcmp(command, testCommand) == 0){
 				if(checkGlobalPrivilege(sender) <= 0){
 					char sending[256];
 					strcpy(sending, "Hello ");
@@ -494,7 +548,6 @@ int handleMessage(char *message){
 				char* charPrivilege;;
 				if(channel != NULL && checkChannelPrivilege(channel, sender) <= channel->addCommandPrivilegeLevel){
 					if((token = strtok(NULL, delimitors)) != NULL && token[0] == '!' && (charPrivilege = strtok(NULL, delimitors)) != NULL){
-						printf("TOKEN: %s\nprivilege: %s\n", token, charPrivilege);
 
 						int convertedPrivilege;
 						convertedPrivilege = (int) strtoimax(charPrivilege, NULL, 10);
@@ -589,7 +642,8 @@ int sendMessage(const char* command, const char* target, const char* message, ch
 }
 
 
-int initializeChannelAndUserLists(const char* fileName){
+int initializeChannelAndUserLists(){
+
 	char mainAdmin[] = "bobjrsenior";
 
 	//Initialize Global List
@@ -608,8 +662,95 @@ int initializeChannelAndUserLists(const char* fileName){
 		return -1;
 	}
 
+	if(saveFile != NULL && loadCurrentState() >= 0){
+		return 0;
+	}
 
 	return addGlobalUser(mainAdmin, 0);
+}
+
+int saveCurrentState(){
+	int e = 0, a = 0;
+	FILE* fptr;
+
+	if((fptr = fopen(saveFile, "w")) == NULL){
+		return -1;
+	}
+	
+	fprintf(fptr, "%d\n", numGlobalUsers);
+
+	for(; e < numGlobalUsers; ++e){
+		fprintf(fptr, "%s %d\n", globalUsers[e].username, globalUsers[e].privilegeLevel);
+	}
+
+	fprintf(fptr, "%d\n", numChannels);
+
+	for(e = 0; e < numChannels; ++e){
+		fprintf(fptr, "%s\n%d\n%d\n", channels[e].channelName, channels[e].addCommandPrivilegeLevel, channels[e].numCommands);
+		Command* commands = channels[e].commands;
+		for(a = 0; a < channels[e].numCommands; ++a){
+			fprintf(fptr, "%d\n%s\n%s\n", commands[a].privilegeLevel, commands[a].command, commands[a].message);
+		}
+		fprintf(fptr, "%d\n", channels[e].numUsers);
+		User* users = channels[e].users;
+		for(a = 0; a < channels[e].numUsers; ++a){
+			fprintf(fptr, "%s %d\n", users[a].username, users[a].privilegeLevel);
+		}
+	}
+	fclose(fptr);
+	return 0;
+}
+
+int loadCurrentState(){
+	int e = 0, a = 0;
+	int tempInt1, tempInt2;
+	char tempChar1[256], tempChar2[256];
+	FILE* fptr;
+
+	if((fptr = fopen(saveFile, "r")) == NULL){
+		return -1;
+	}
+	
+	fscanf(fptr, "%d", &tempInt1);
+	
+	for(; e < tempInt1; ++e){
+			
+		fscanf(fptr, "%255s %d", tempChar1, &tempInt2);
+		if(addGlobalUser(tempChar1, tempInt2) < 0){
+			return -1;
+		}
+	}
+
+	fscanf(fptr, "%d", &tempInt1);
+
+	for(e = 0; e < tempInt1; ++e){
+		Channel* channel;
+		fscanf(fptr, "%255s", tempChar1);
+		if(addChannel(tempChar1) < 0 || (channel = getChannel(tempChar1)) == NULL){
+			return -1;
+		}
+		fscanf(fptr, "%d", &tempInt2);
+		channel->addCommandPrivilegeLevel = tempInt2;
+		fscanf(fptr, "%d", &tempInt2);
+
+		for(a = 0; a < tempInt2; ++a){
+			int privilegeLevel;
+			fscanf(fptr, "%d %255s\n%255[^\n]s", &privilegeLevel, tempChar1, tempChar2);
+			if(addNewChannelCommand(channel, tempChar1, tempChar2, privilegeLevel) < 0){
+				return -1;
+			}
+		}
+
+		fscanf(fptr, "%d", &tempInt2);
+		
+		for(a = 0; a < tempInt2; ++a){
+			int privilegeLevel;
+			fscanf(fptr, "%255s %d", tempChar1, &privilegeLevel);
+			addChannelUser(channel, tempChar1, privilegeLevel);
+		}
+	}	
+
+	return 0;
 }
 
 int resizeGlobalUsers(){
